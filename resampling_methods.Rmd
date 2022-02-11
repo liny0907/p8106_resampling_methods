@@ -2,20 +2,137 @@
 title: "Resampling Methods" 
 author: "Lin Yang"
 output: github_document
+---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
-# Generate a simulated training dataset
 ```{r}
-
+library(FNN)
+library(caret)
 ```
 
 
+# Generate a simulated training dataset
+```{r}
+gen_data <- function(n) {
+  x1 <- rnorm(n, mean = 1)
+  x2 <- rnorm(n, mean = 1)
+  eps <- rnorm(n, sd = 0.5)
+  y <- sin(x1) + (x2)^2 + eps
+  data.frame(Y = y, X1 = x1, X2 = x2)
+}
 
+set.seed(2022)
+trainData <- gen_data(200)
+trainData
+```
 
+# Data splitting functions
 
+## Training/Validation Splitting
+```{r}
+vsSplits <- createDataPartition(y = trainData$Y,
+                                times = 2,
+                                p = 0.8,
+                                groups = 5,
+                                list = FALSE)
+vsSplits
+```
 
+## K-fold CV
+```{r}
+#10-fold CV
+set.seed(1)
+cvSplits <- createFolds(y = trainData$Y,
+                        k = 10,
+                        returnTrain = TRUE)
+str(cvSplits)
+
+#repeated 10-fold CV
+set.seed(1)
+rcvSplits <- createMultiFolds(y = trainData$Y,
+                              k= 10,
+                              times = 5)
+length(rcvSplits)
+```
+
+A simple example:
+```{r}
+K <- length(rcvSplits)
+mseK_lm <- rep(NA, K)
+mseK_knn <- rep(NA, K)
+
+for (k in 1:K) {
+  trRows <- rcvSplits[[k]]
+  
+  fit_lm <- lm(Y ~ X1 + X2, data = trainData[trRows,])
+  pred_lm <- predict(fit_lm, trainData[-trRows,])
+  pred_knn <- knn.reg(train = trainData[trRows, 2:3],
+                      test = trainData[-trRows, 2:3],
+                      y = trainData$Y[trRows], k = 3)
+  mseK_lm[k] <- mean((trainData$Y[-trRows] - pred_lm)^2)
+  mseK_knn[k] <- mean((trainData$Y[-trRows] - pred_knn$pred)^2)
+}
+
+c(mean(mseK_lm), mean(mseK_knn))
+```
+
+# Specify the resampling method using `trainControl`
+
+```{r}
+# K-fold CV
+ctrl1 <- trainControl(method = 'cv', number = 10)
+# leave-one-out CV
+ctrl2 <- trainControl(method = 'LOOCV')
+# leave-group-out / Monte Carlo CV
+ctrl3 <- trainControl(method = 'LGOCV', p = 0.75, number = 50)
+# 632 bootstrap
+ctrl4 <- trainControl(method = 'boot632', number = 100)
+# repeated K-fold CV
+ctrl5 <- trainControl(method = 'repeatedcv', repeats = 5, number = 10)
+# user-specified folds
+ctrl7 <- trainControl(index = rcvSplits)
+# only fit one model to the entire training set
+ctrl6 <- trainControl(method = 'none')
+```
+
+```{r}
+set.seed(1)
+lmFit <- train(Y~.,
+               data = trainData,
+               method = 'lm',
+               trControl = ctrl4)
+
+set.seed(1)
+knnFit <- train(Y~.,
+                data = trainData,
+                method = 'knn',
+                trControl = ctrl4)
+
+identical(lmFit$control$index, knnFit$control$index)
+
+lmFit2 <- train(Y~.,
+                data = trainData,
+                method = 'lm',
+                trControl = ctrl7)
+mean((lmFit2$resample$RMSE)^2)
+mean(mseK_lm)
+
+knnFit2 <- train(Y~.,
+                 data = trainData,
+                 method = 'knn',
+                 tuneGrid = data.frame(k = 3),
+                 trControl = ctrl7)
+mean((knnFit2$resample$RMSE)^2)
+mean(mseK_knn)
+```
+
+To compare these two models based on their cross-validation statistics, the `resamples()` function can be used with models that share a *common* set of resampled datasets.
+```{r}
+resamp <- resamples(list(lm = lmFit, knn = knnFit))
+summary(resamp)
+```
 
 
