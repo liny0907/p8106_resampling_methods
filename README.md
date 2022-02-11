@@ -1,1 +1,1 @@
-# p8106_resampling_methods
+This is the repository for resampling methods
